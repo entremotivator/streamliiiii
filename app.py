@@ -2,158 +2,6 @@ import streamlit as st
 import requests
 import json
 
-# --- Configuration from User's Provided Data ---
-# The actual API key will be loaded from st.secrets
-# VAPI_API_KEY = st.secrets["vapi_api_key"] 
-
-# All AI Agents with their Assistant IDs (from user's pasted_content.txt)
-AI_AGENTS = {
-    "Agent CEO": {
-        "id": "bf161516-6d88-490c-972e-274098a6b51a",
-        "category": "Leadership",
-        "description": "Executive leadership and strategic decision-making assistant for C-level operations and corporate governance.",
-        "capabilities": ["Strategic Planning", "Executive Decisions", "Corporate Governance", "Leadership Guidance"]
-    },
-    "Agent Social": {
-        "id": "bf161516-6d88-490c-972e-274098a6b51a",
-        "category": "Marketing",
-        "description": "Social media management and digital marketing specialist for brand engagement and online presence.",
-        "capabilities": ["Social Media Strategy", "Content Creation", "Brand Management", "Digital Marketing"]
-    },
-    "Agent Mindset": {
-        "id": "4fe7083e-2f28-4502-b6bf-4ae6ea71a8f4",
-        "category": "Personal Development",
-        "description": "Personal development and mindset coaching for motivation, goal setting, and mental wellness.",
-        "capabilities": ["Mindset Coaching", "Goal Setting", "Motivation", "Personal Growth"]
-    },
-    "Agent Blogger": {
-        "id": "f8ef1ad5-5281-42f1-ae69-f94ff7acb453",
-        "category": "Content Creation",
-        "description": "Content creation and blogging specialist for article writing, SEO optimization, and content strategy.",
-        "capabilities": ["Blog Writing", "SEO Optimization", "Content Strategy", "Editorial Planning"]
-    },
-    "Agent Grant": {
-        "id": "7673e69d-170b-4319-bdf4-e74e5370e98a",
-        "category": "Funding",
-        "description": "Grant writing and funding acquisition specialist for non-profits, startups, and research projects.",
-        "capabilities": ["Grant Writing", "Funding Research", "Proposal Development", "Application Support"]
-    },
-    "Agent Prayer AI": {
-        "id": "339cdad6-9989-4bb6-98ed-bd15521707d1",
-        "category": "Spiritual",
-        "description": "Spiritual guidance and prayer support for faith-based counseling and religious assistance.",
-        "capabilities": ["Spiritual Guidance", "Prayer Support", "Faith Counseling", "Religious Education"]
-    },
-    "Agent Metrics": {
-        "id": "4820eab2-adaf-4f17-a8a0-30cab3e3f007",
-        "category": "Analytics",
-        "description": "Data analytics and metrics tracking specialist for KPI monitoring and performance analysis.",
-        "capabilities": ["Data Analysis", "KPI Tracking", "Performance Metrics", "Reporting"]
-    },
-    "Agent Researcher": {
-        "id": "f05c182f-d3d1-4a17-9c79-52442a9171b8",
-        "category": "Research",
-        "description": "Research and information gathering specialist for market research, academic studies, and data collection.",
-        "capabilities": ["Market Research", "Academic Research", "Data Collection", "Information Analysis"]
-    },
-    "Agent Investor": {
-        "id": "1008771d-86ca-472a-a125-7a7e10100297",
-        "category": "Finance",
-        "description": "Investment advisory and financial planning specialist for portfolio management and investment strategies.",
-        "capabilities": ["Investment Analysis", "Portfolio Management", "Financial Planning", "Market Analysis"]
-    },
-    "Agent Newsroom": {
-        "id": "76f1d6e5-cab4-45b8-9aeb-d3e6f3c0c019",
-        "category": "Media",
-        "description": "News reporting and journalism specialist for press releases, news articles, and media communications.",
-        "capabilities": ["News Writing", "Press Releases", "Media Relations", "Journalism"]
-    },
-    "STREAMLIT Agent": {
-        "id": "538258da-0dda-473d-8ef8-5427251f3ad5",
-        "category": "Development",
-        "description": "Streamlit application development specialist for data apps and interactive dashboards.",
-        "capabilities": ["Streamlit Development", "Data Visualization", "Dashboard Creation", "Web Apps"]
-    },
-    "HTML/CSS Agent": {
-        "id": "14b94e2f-299b-4e75-a445-a4f5feacc522",
-        "category": "Development",
-        "description": "Web development specialist for HTML, CSS, and frontend design implementation.",
-        "capabilities": ["HTML Development", "CSS Styling", "Frontend Design", "Responsive Design"]
-    },
-    "Business Plan Agent": {
-        "id": "bea627a6-3aaf-45d0-8753-94f98d80972c",
-        "category": "Business",
-        "description": "Business planning and strategy development specialist for comprehensive business plan creation.",
-        "capabilities": ["Business Planning", "Strategy Development", "Market Analysis", "Financial Projections"]
-    },
-    "Ecom Agent": {
-        "id": "04b80e02-9615-4c06-9424-93b4b1e2cdc9",
-        "category": "E-commerce",
-        "description": "E-commerce specialist for online store management, product optimization, and sales strategies.",
-        "capabilities": ["E-commerce Strategy", "Product Management", "Sales Optimization", "Online Marketing"]
-    },
-    "Agent Health": {
-        "id": "7b2b8b86-5caa-4f28-8c6b-e7d3d0404f06",
-        "category": "Healthcare",
-        "description": "Health and wellness specialist for medical information, fitness guidance, and wellness coaching.",
-        "capabilities": ["Health Consultation", "Wellness Coaching", "Fitness Guidance", "Medical Information"]
-    },
-    "Cinch Closer": {
-        "id": "232f3d9c-18b3-4963-bdd9-e7de3be156ae",
-        "category": "Sales",
-        "description": "Sales closing specialist for deal negotiation, customer conversion, and sales optimization.",
-        "capabilities": ["Sales Closing", "Deal Negotiation", "Customer Conversion", "Sales Strategy"]
-    },
-    "DISC Agent": {
-        "id": "41fe59e1-829f-4936-8ee5-eef2bb1287fe",
-        "category": "Psychology",
-        "description": "DISC personality assessment specialist for behavioral analysis and team development.",
-        "capabilities": ["DISC Assessment", "Personality Analysis", "Team Building", "Behavioral Coaching"]
-    },
-    "Invoice Agent": {
-        "id": "invoice-agent-id-placeholder",
-        "category": "Finance",
-        "description": "Invoice management and billing specialist for automated invoicing and payment processing.",
-        "capabilities": ["Invoice Creation", "Billing Management", "Payment Processing", "Financial Tracking"]
-    },
-    "Agent Clone": {
-        "id": "88862739-c227-4bfc-b90a-5f450a823e23",
-        "category": "AI",
-        "description": "AI cloning and replication specialist for creating personalized AI assistants and voice clones.",
-        "capabilities": ["AI Cloning", "Voice Replication", "Personalization", "AI Training"]
-    },
-    "Agent Doctor": {
-        "id": "9d1cccc6-3193-4694-a9f7-853198ee4082",
-        "category": "Healthcare",
-        "description": "Medical consultation specialist for health assessments, symptom analysis, and medical guidance.",
-        "capabilities": ["Medical Consultation", "Symptom Analysis", "Health Assessment", "Medical Guidance"]
-    },
-    "Agent Multi-Lig": {
-        "id": "8f045bce-08bc-4477-8d3d-05f233a44df3",
-        "category": "Language",
-        "description": "Multilingual communication specialist for translation, interpretation, and cross-cultural communication.",
-        "capabilities": ["Translation", "Interpretation", "Multilingual Support", "Cultural Communication"]
-    },
-    "Agent Real Estate": {
-        "id": "d982667e-d931-477c-9708-c183ba0aa964",
-        "category": "Real Estate",
-        "description": "Real estate specialist for property analysis, market evaluation, and real estate transactions.",
-        "capabilities": ["Property Analysis", "Market Evaluation", "Real Estate Transactions", "Investment Analysis"]
-    },
-    "Business Launcher": {
-        "id": "dffb2e5c-7d59-462b-a8aa-48746ea70cb1",
-        "category": "Business",
-        "description": "Business launch specialist for startup guidance, business setup, and entrepreneurial support.",
-        "capabilities": ["Startup Guidance", "Business Setup", "Entrepreneurial Support", "Launch Strategy"]
-    },
-    "Agent Booking": {
-        "id": "6de56812-68b9-4b13-8a5c-69f45e642af2",
-        "category": "Scheduling",
-        "description": "Booking and scheduling specialist for appointment management, calendar coordination, and reservation systems.",
-        "capabilities": ["Appointment Scheduling", "Calendar Management", "Booking Systems", "Reservation Handling"]
-    }
-}
-
 # --- Vapi API Client Functions ---
 
 VAPI_BASE_URL = "https://api.vapi.ai/assistant"
@@ -162,6 +10,9 @@ def get_headers():
     """Constructs the authorization headers using the secret API key."""
     try:
         api_key = st.secrets["vapi_api_key"]
+        if api_key == "YOUR_VAPI_API_KEY":
+            st.error("Please replace 'YOUR_VAPI_API_KEY' in .streamlit/secrets.toml with your actual Vapi API key.")
+            return None
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
@@ -169,6 +20,27 @@ def get_headers():
     except KeyError:
         st.error("Vapi API Key not found in Streamlit secrets. Please configure `vapi_api_key`.")
         return None
+
+@st.cache_data(ttl=3600) # Cache the list for 1 hour
+def list_assistants():
+    """Fetches the list of all assistants from the Vapi API."""
+    headers = get_headers()
+    if not headers:
+        return []
+    
+    url = VAPI_BASE_URL
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        # The API returns a list of assistant objects
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP Error listing assistants: {e.response.status_code} - {e.response.text}")
+        st.warning("This usually means your API key is invalid or has insufficient permissions.")
+        return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error listing assistants: {e}")
+        return []
 
 def get_assistant_config(assistant_id):
     """Fetches the current configuration for a given assistant ID."""
@@ -183,6 +55,7 @@ def get_assistant_config(assistant_id):
         return response.json()
     except requests.exceptions.HTTPError as e:
         st.error(f"HTTP Error fetching config: {e.response.status_code} - {e.response.text}")
+        st.warning("The selected Assistant ID might be invalid or deleted.")
         return None
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching config: {e}")
@@ -214,6 +87,7 @@ def update_assistant_config(assistant_id, payload):
 def get_system_prompt(config):
     """Extracts the system prompt from the assistant config."""
     if config and 'model' in config and 'messages' in config['model']:
+        # System prompt is the first message with role 'system'
         for message in config['model']['messages']:
             if message.get('role') == 'system':
                 return message.get('content', '')
@@ -248,19 +122,36 @@ def main():
     st.markdown("Use this tool to fetch and update the configuration of your Vapi assistants.")
 
     # --- Agent Selection ---
-    agent_names = list(AI_AGENTS.keys())
+    
+    # 1. Fetch the list of assistants from the Vapi API
+    assistants = list_assistants()
+    
+    if not assistants:
+        st.error("Could not load any Vapi assistants. Please check your API key and network connection.")
+        return
+
+    # Create a dictionary for easy lookup: {name: id}
+    assistant_map = {f"{a.get('name', 'Unnamed Agent')} ({a['id'][:8]}...)": a['id'] for a in assistants}
+    agent_names = list(assistant_map.keys())
+    
     selected_agent_name = st.sidebar.selectbox("Select Agent to Edit", agent_names)
     
     if selected_agent_name:
-        assistant_id = AI_AGENTS[selected_agent_name]['id']
+        assistant_id = assistant_map[selected_agent_name]
         st.sidebar.info(f"**Assistant ID:** `{assistant_id}`")
         
+        # Clear config if a new agent is selected
+        if 'selected_agent_id' in st.session_state and st.session_state.selected_agent_id != assistant_id:
+            st.session_state.current_config = None
+            st.session_state.selected_agent_id = assistant_id
+        elif 'selected_agent_id' not in st.session_state:
+            st.session_state.selected_agent_id = assistant_id
+
         if st.sidebar.button("Load Agent Configuration", use_container_width=True):
             with st.spinner(f"Fetching configuration for {selected_agent_name}..."):
                 config = get_assistant_config(assistant_id)
                 if config:
                     st.session_state.current_config = config
-                    st.session_state.selected_agent_id = assistant_id
                     st.session_state.selected_agent_name = selected_agent_name
                     st.success("Configuration loaded successfully!")
                 else:
@@ -276,7 +167,7 @@ def main():
         st.subheader("Core Settings")
         
         # Extract fields for editing
-        current_name = config.get('name', st.session_state.selected_agent_name)
+        current_name = config.get('name', st.session_state.selected_agent_name.split(' (')[0])
         current_first_message = config.get('firstMessage', '')
         current_system_prompt = get_system_prompt(config)
         current_voice_id = config.get('voice', {}).get('voiceId', 'N/A')
@@ -349,14 +240,15 @@ def main():
                     st.json(payload)
                     
                     # 2. Send the update
-                    update_assistant_config(st.session_state.selected_agent_id, payload)
-                    
-                    # 3. Reload config to show latest changes
-                    with st.spinner("Reloading configuration..."):
-                        reloaded_config = get_assistant_config(st.session_state.selected_agent_id)
-                        if reloaded_config:
-                            st.session_state.current_config = reloaded_config
-                            st.rerun()
+                    if update_assistant_config(st.session_state.selected_agent_id, payload):
+                        # 3. Reload config to show latest changes
+                        with st.spinner("Reloading configuration..."):
+                            # Clear cache to force a fresh list load if the name changed
+                            list_assistants.clear()
+                            reloaded_config = get_assistant_config(st.session_state.selected_agent_id)
+                            if reloaded_config:
+                                st.session_state.current_config = reloaded_config
+                                st.rerun()
                 else:
                     st.info("No changes detected. Nothing to save.")
 
