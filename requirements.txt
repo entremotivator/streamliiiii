@@ -1,4 +1,2 @@
 pandas
 numpy
-WeasyPrint
-vapi_python
