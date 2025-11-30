@@ -3,6 +3,7 @@ import requests
 import json
 from datetime import datetime
 import time
+import pandas as pd
 
 # --- Vapi API Client Functions ---
 
@@ -26,15 +27,16 @@ def get_headers():
 # --- Assistant Management ---
 
 @st.cache_data(ttl=300)
-def list_assistants():
+def list_assistants(limit=100):
     """Fetches the list of all assistants from the Vapi API."""
     headers = get_headers()
     if not headers:
         return []
     
     url = f"{VAPI_BASE_URL}/assistant"
+    params = {"limit": limit}
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
@@ -72,7 +74,7 @@ def update_assistant_config(assistant_id, payload):
     try:
         response = requests.patch(url, headers=headers, data=json.dumps(payload))
         response.raise_for_status()
-        st.success(f"✅ Successfully updated agent {assistant_id}!")
+        st.success(f"✅ Successfully updated agent {assistant_id[:12]}...")
         return True
     except requests.exceptions.HTTPError as e:
         st.error(f"HTTP Error updating config: {e.response.status_code} - {e.response.text}")
@@ -99,6 +101,25 @@ def create_assistant(payload):
         st.error(f"Error creating assistant: {e}")
         return None
 
+def clone_assistant(assistant_id, new_name=None):
+    """Clones an existing assistant with a new name."""
+    config = get_assistant_config(assistant_id)
+    if not config:
+        return None
+    
+    # Remove system fields
+    fields_to_remove = ['id', 'orgId', 'createdAt', 'updatedAt']
+    for field in fields_to_remove:
+        config.pop(field, None)
+    
+    # Update name
+    if new_name:
+        config['name'] = new_name
+    else:
+        config['name'] = f"{config.get('name', 'Assistant')} (Copy)"
+    
+    return create_assistant(config)
+
 def delete_assistant(assistant_id):
     """Deletes an assistant."""
     headers = get_headers()
@@ -119,7 +140,7 @@ def delete_assistant(assistant_id):
 
 # --- Call Management ---
 
-def list_calls(assistant_id=None, limit=10):
+def list_calls(assistant_id=None, limit=50):
     """Fetches recent calls, optionally filtered by assistant."""
     headers = get_headers()
     if not headers:
@@ -170,6 +191,117 @@ def list_phone_numbers():
         st.error(f"Error fetching phone numbers: {e}")
         return []
 
+def update_phone_number(phone_id, payload):
+    """Updates a phone number configuration."""
+    headers = get_headers()
+    if not headers:
+        return False
+    
+    url = f"{VAPI_BASE_URL}/phone-number/{phone_id}"
+    try:
+        response = requests.patch(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status()
+        return True
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error updating phone number: {e}")
+        return False
+
+# --- Squad Management ---
+
+def list_squads():
+    """Fetches all squads (assistant groups)."""
+    headers = get_headers()
+    if not headers:
+        return []
+    
+    url = f"{VAPI_BASE_URL}/squad"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching squads: {e}")
+        return []
+
+def create_squad(payload):
+    """Creates a new squad."""
+    headers = get_headers()
+    if not headers:
+        return None
+    
+    url = f"{VAPI_BASE_URL}/squad"
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error creating squad: {e}")
+        return None
+
+# --- Tool/Function Management ---
+
+def list_tools():
+    """Fetches all custom tools/functions."""
+    headers = get_headers()
+    if not headers:
+        return []
+    
+    url = f"{VAPI_BASE_URL}/tool"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching tools: {e}")
+        return []
+
+def create_tool(payload):
+    """Creates a new tool."""
+    headers = get_headers()
+    if not headers:
+        return None
+    
+    url = f"{VAPI_BASE_URL}/tool"
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error creating tool: {e}")
+        return None
+
+# --- Analytics & Logs ---
+
+def get_analytics_summary():
+    """Gets overall analytics summary."""
+    headers = get_headers()
+    if not headers:
+        return None
+    
+    url = f"{VAPI_BASE_URL}/analytics"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        # API might not support this endpoint
+        return None
+
+def list_logs(limit=100):
+    """Fetches system logs."""
+    headers = get_headers()
+    if not headers:
+        return []
+    
+    url = f"{VAPI_BASE_URL}/log"
+    params = {"limit": limit}
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return []
+
 # --- Helper Functions ---
 
 def get_system_prompt(config):
@@ -195,480 +327,544 @@ def set_system_prompt(config, new_prompt):
             break
     
     if not found and new_prompt:
+        # Prepend the system message to ensure it's the first one
         config['model']['messages'].insert(0, {"role": "system", "content": new_prompt})
 
-def format_timestamp(timestamp):
-    """Formats ISO timestamp to readable format."""
-    try:
-        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
-    except:
-        return timestamp
+def get_agent_list():
+    """Combines hardcoded list with dynamically fetched list."""
+    # Hardcoded list from user's provided data
+    AI_AGENTS = {
+        "Agent CEO": {"id": "bf161516-6d88-490c-972e-274098a6b51a"},
+        "Agent Social": {"id": "bf161516-6d88-490c-972e-274098a6b51a"},
+        "Agent Mindset": {"id": "4fe7083e-2f28-4502-b6bf-4ae6ea71a8f4"},
+        "Agent Blogger": {"id": "f8ef1ad5-5281-42f1-ae69-f94ff7acb453"},
+        "Agent Grant": {"id": "7673e69d-170b-4319-bdf4-e74e5370e98a"},
+        "Agent Prayer AI": {"id": "339cdad6-9989-4bb6-98ed-bd15521707d1"},
+        "Agent Metrics": {"id": "4820eab2-adaf-4f17-a8a0-30cab3e3f007"},
+        "Agent Researcher": {"id": "f05c182f-d3d1-4a17-9c79-52442a9171b8"},
+        "Agent Investor": {"id": "1008771d-86ca-472a-a125-7a7e10100297"},
+        "Agent Newsroom": {"id": "76f1d6e5-cab4-45b8-9aeb-d3e6f3c0c019"},
+        "STREAMLIT Agent": {"id": "538258da-0dda-473d-8ef8-5427251f3ad5"},
+        "HTML/CSS Agent": {"id": "14b94e2f-299b-4e75-a445-a4f5feacc522"},
+        "Business Plan Agent": {"id": "bea627a6-3aaf-45d0-8753-94f98d80972c"},
+        "Ecom Agent": {"id": "04b80e02-9615-4c06-9424-93b4b1e2cdc9"},
+        "Agent Health": {"id": "7b2b8b86-5caa-4f28-8c6b-e7d3d0404f06"},
+        "Cinch Closer": {"id": "232f3d9c-18b3-4963-bdd9-e7de3be156ae"},
+        "DISC Agent": {"id": "41fe59e1-829f-4936-8ee5-eef2bb1287fe"},
+        "Invoice Agent": {"id": "invoice-agent-id-placeholder"},
+        "Agent Clone": {"id": "88862739-c227-4bfc-b90a-5f450a823e23"},
+        "Agent Doctor": {"id": "9d1cccc6-3193-4694-a9f7-853198ee4082"},
+        "Agent Multi-Lig": {"id": "8f045bce-08bc-4477-8d3d-05f233a44df3"},
+        "Agent Real Estate": {"id": "d982667e-d931-477c-9708-c183ba0aa964"},
+        "Business Launcher": {"id": "dffb2e5c-7d59-462b-a8aa-48746ea70cb1"},
+        "Agent Booking": {"id": "6de56812-68b9-4b13-8a5c-69f45e642af2"}
+    }
+    
+    # Combine with fetched list for validity check
+    fetched_agents = list_assistants()
+    combined_agents = {}
+    
+    # Add fetched agents first (they are guaranteed to be valid)
+    for agent in fetched_agents:
+        name = agent.get('name', 'Unnamed Agent')
+        combined_agents[f"{name} (Live)"] = {"id": agent['id'], "live": True}
+        
+    # Add hardcoded agents, avoiding duplicates if possible
+    for name, details in AI_AGENTS.items():
+        if details['id'] not in [a['id'] for a in fetched_agents]:
+            combined_agents[f"{name} (Hardcoded)"] = {"id": details['id'], "live": False}
+            
+    return combined_agents
 
-# --- UI Components ---
-
-def render_assistant_editor(config, assistant_id):
-    """Renders the main assistant editor form."""
-    
-    # Extract current values
-    current_name = config.get('name', 'Unnamed Agent')
-    current_first_message = config.get('firstMessage', '')
-    current_system_prompt = get_system_prompt(config)
-    
-    # Voice settings
-    voice_config = config.get('voice', {})
-    current_voice_id = voice_config.get('voiceId', 'andrew')
-    current_voice_provider = voice_config.get('provider', 'playht')
-    
-    # Model settings
-    model_config = config.get('model', {})
-    current_model = model_config.get('model', 'gpt-4')
-    current_temperature = model_config.get('temperature', 0.7)
-    current_max_tokens = model_config.get('maxTokens', 250)
-    
-    # Advanced settings
-    current_end_call_phrases = config.get('endCallPhrases', [])
-    current_silence_timeout = config.get('silenceTimeoutSeconds', 30)
-    current_max_duration = config.get('maxDurationSeconds', 600)
-    current_background_sound = config.get('backgroundSound', 'off')
-    
-    with st.form("agent_editor_form"):
-        
-        # Basic Info
-        st.subheader("🔹 Basic Information")
-        col1, col2 = st.columns(2)
-        with col1:
-            new_name = st.text_input("Agent Name", value=current_name, max_chars=100)
-        with col2:
-            new_background_sound = st.selectbox(
-                "Background Sound",
-                options=['off', 'office'],
-                index=['off', 'office'].index(current_background_sound) if current_background_sound in ['off', 'office'] else 0
-            )
-        
-        st.divider()
-        
-        # Messages
-        st.subheader("💬 Conversation Settings")
-        new_first_message = st.text_area(
-            "First Message (Initial Greeting)", 
-            value=current_first_message, 
-            height=100,
-            help="The first message the agent speaks. Leave blank for user to speak first."
-        )
-        
-        new_system_prompt = st.text_area(
-            "System Prompt (Agent Personality & Instructions)", 
-            value=current_system_prompt, 
-            height=300,
-            help="Main instruction set for your AI agent."
-        )
-        
-        # End call phrases
-        end_phrases_text = st.text_area(
-            "End Call Phrases (one per line)",
-            value="\n".join(current_end_call_phrases),
-            height=80,
-            help="Phrases that will trigger the call to end"
-        )
-        new_end_call_phrases = [p.strip() for p in end_phrases_text.split('\n') if p.strip()]
-        
-        st.divider()
-        
-        # Model Configuration
-        st.subheader("🤖 AI Model Settings")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            new_model = st.selectbox(
-                "LLM Model",
-                options=['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'],
-                index=['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'].index(current_model) if current_model in ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'] else 0
-            )
-        with col2:
-            new_temperature = st.slider("Temperature", 0.0, 2.0, current_temperature, 0.1)
-        with col3:
-            new_max_tokens = st.number_input("Max Tokens", 50, 4000, current_max_tokens, 50)
-        
-        st.divider()
-        
-        # Voice Configuration
-        st.subheader("🎙️ Voice Settings")
-        col1, col2 = st.columns(2)
-        with col1:
-            new_voice_provider = st.selectbox(
-                "Voice Provider",
-                options=['playht', 'elevenlabs', 'azure'],
-                index=['playht', 'elevenlabs', 'azure'].index(current_voice_provider) if current_voice_provider in ['playht', 'elevenlabs', 'azure'] else 0
-            )
-        with col2:
-            new_voice_id = st.text_input("Voice ID", value=current_voice_id, help="e.g., andrew, jennifer")
-        
-        st.divider()
-        
-        # Timing Settings
-        st.subheader("⏱️ Timing & Duration")
-        col1, col2 = st.columns(2)
-        with col1:
-            new_silence_timeout = st.number_input(
-                "Silence Timeout (seconds)", 
-                5, 300, current_silence_timeout, 5,
-                help="How long to wait before ending call due to silence"
-            )
-        with col2:
-            new_max_duration = st.number_input(
-                "Max Call Duration (seconds)", 
-                60, 3600, current_max_duration, 60,
-                help="Maximum duration for a call"
-            )
-        
-        # Submit buttons
-        st.divider()
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            submitted = st.form_submit_button("💾 Save All Changes", use_container_width=True, type="primary")
-        with col2:
-            preview = st.form_submit_button("👁️ Preview Changes", use_container_width=True)
-        with col3:
-            reset = st.form_submit_button("🔄 Reset Form", use_container_width=True)
-        
-        if submitted:
-            # Build payload
-            payload = {}
-            
-            if new_name != current_name:
-                payload['name'] = new_name
-            
-            if new_first_message != current_first_message:
-                payload['firstMessage'] = new_first_message
-            
-            if new_background_sound != current_background_sound:
-                payload['backgroundSound'] = new_background_sound
-            
-            if new_end_call_phrases != current_end_call_phrases:
-                payload['endCallPhrases'] = new_end_call_phrases
-            
-            if new_silence_timeout != current_silence_timeout:
-                payload['silenceTimeoutSeconds'] = new_silence_timeout
-            
-            if new_max_duration != current_max_duration:
-                payload['maxDurationSeconds'] = new_max_duration
-            
-            # System prompt
-            temp_config = json.loads(json.dumps(config))
-            set_system_prompt(temp_config, new_system_prompt)
-            if temp_config['model']['messages'] != config['model']['messages']:
-                if 'model' not in payload:
-                    payload['model'] = {}
-                payload['model']['messages'] = temp_config['model']['messages']
-            
-            # Model settings
-            if new_model != current_model or new_temperature != current_temperature or new_max_tokens != current_max_tokens:
-                if 'model' not in payload:
-                    payload['model'] = {}
-                if new_model != current_model:
-                    payload['model']['model'] = new_model
-                if new_temperature != current_temperature:
-                    payload['model']['temperature'] = new_temperature
-                if new_max_tokens != current_max_tokens:
-                    payload['model']['maxTokens'] = new_max_tokens
-            
-            # Voice settings
-            if new_voice_id != current_voice_id or new_voice_provider != current_voice_provider:
-                payload['voice'] = {
-                    'provider': new_voice_provider,
-                    'voiceId': new_voice_id
-                }
-            
-            if payload:
-                with st.spinner("Saving changes..."):
-                    if update_assistant_config(assistant_id, payload):
-                        list_assistants.clear()
-                        time.sleep(0.5)
-                        reloaded_config = get_assistant_config(assistant_id)
-                        if reloaded_config:
-                            st.session_state.current_config = reloaded_config
-                            st.rerun()
-            else:
-                st.info("No changes detected.")
-        
-        elif preview:
-            st.subheader("Preview of Changes")
-            payload = {
-                'name': new_name,
-                'firstMessage': new_first_message,
-                'model': {
-                    'model': new_model,
-                    'temperature': new_temperature,
-                    'maxTokens': new_max_tokens
-                },
-                'voice': {
-                    'provider': new_voice_provider,
-                    'voiceId': new_voice_id
-                },
-                'silenceTimeoutSeconds': new_silence_timeout,
-                'maxDurationSeconds': new_max_duration,
-                'backgroundSound': new_background_sound,
-                'endCallPhrases': new_end_call_phrases
-            }
-            st.json(payload)
-        
-        elif reset:
-            st.rerun()
-
-def render_call_analytics(assistant_id):
-    """Renders call analytics for an assistant."""
-    st.subheader("📞 Recent Calls")
-    
-    calls = list_calls(assistant_id=assistant_id, limit=20)
-    
-    if not calls:
-        st.info("No calls found for this assistant.")
-        return
-    
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Calls", len(calls))
-    with col2:
-        completed = sum(1 for c in calls if c.get('status') == 'ended')
-        st.metric("Completed", completed)
-    with col3:
-        avg_duration = sum(c.get('duration', 0) for c in calls) / len(calls) if calls else 0
-        st.metric("Avg Duration", f"{avg_duration:.1f}s")
-    with col4:
-        total_cost = sum(c.get('cost', 0) for c in calls)
-        st.metric("Total Cost", f"${total_cost:.2f}")
-    
-    # Call list
-    st.divider()
-    for call in calls[:10]:
-        with st.expander(f"Call {call.get('id', 'Unknown')[:8]}... - {format_timestamp(call.get('createdAt', ''))}"):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"**Status:** {call.get('status', 'Unknown')}")
-                st.write(f"**Duration:** {call.get('duration', 0)} seconds")
-                st.write(f"**Cost:** ${call.get('cost', 0):.4f}")
-            with col2:
-                st.write(f"**Type:** {call.get('type', 'Unknown')}")
-                st.write(f"**Started:** {format_timestamp(call.get('startedAt', 'N/A'))}")
-                st.write(f"**Ended:** {format_timestamp(call.get('endedAt', 'N/A'))}")
-
-def render_create_assistant():
-    """Renders form to create a new assistant."""
-    st.subheader("➕ Create New Assistant")
-    
-    with st.form("create_assistant_form"):
-        name = st.text_input("Assistant Name", placeholder="My New Agent")
-        
-        model = st.selectbox("Model", ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'])
-        
-        system_prompt = st.text_area(
-            "System Prompt",
-            placeholder="You are a helpful AI assistant...",
-            height=200
-        )
-        
-        voice_provider = st.selectbox("Voice Provider", ['playht', 'elevenlabs'])
-        voice_id = st.text_input("Voice ID", value="andrew")
-        
-        first_message = st.text_input("First Message", placeholder="Hello! How can I help you today?")
-        
-        submitted = st.form_submit_button("Create Assistant", type="primary")
-        
-        if submitted:
-            if not name or not system_prompt:
-                st.error("Please provide at least a name and system prompt.")
-                return
-            
-            payload = {
-                'name': name,
-                'model': {
-                    'model': model,
-                    'messages': [
-                        {'role': 'system', 'content': system_prompt}
-                    ]
-                },
-                'voice': {
-                    'provider': voice_provider,
-                    'voiceId': voice_id
-                }
-            }
-            
-            if first_message:
-                payload['firstMessage'] = first_message
-            
-            with st.spinner("Creating assistant..."):
-                result = create_assistant(payload)
-                if result:
-                    st.success(f"✅ Created assistant: {result.get('id')}")
-                    list_assistants.clear()
-                    time.sleep(1)
-                    st.rerun()
-
-# --- Main App ---
+# --- Streamlit UI Functions ---
 
 def main():
     st.set_page_config(
-        page_title="Vapi Agent Control Center",
-        page_icon="🎯",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        page_title="Vapi Agent Configuration Editor",
+        page_icon="🤖",
+        layout="wide"
     )
     
-    # Custom CSS
-    st.markdown("""
-    <style>
-    .stButton button {
-        width: 100%;
-    }
-    .metric-card {
-        background: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.title("🤖 Vapi Agent Configuration Editor")
+    st.markdown("Use this comprehensive tool to manage your Vapi assistants, phone numbers, and calls.")
+
+    # --- Sidebar Navigation ---
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", ["Assistant Editor", "Phone Number Manager", "Call Logs", "Squads & Tools"])
+    st.sidebar.divider()
     
-    st.title("🎯 Vapi Agent Control Center")
-    st.markdown("Advanced configuration and management for your Vapi AI assistants")
+    if page == "Assistant Editor":
+        assistant_editor_page()
+    elif page == "Phone Number Manager":
+        phone_number_manager_page()
+    elif page == "Call Logs":
+        call_logs_page()
+    elif page == "Squads & Tools":
+        squads_tools_page()
 
-    # Sidebar Navigation
-    with st.sidebar:
-        st.header("Navigation")
+def assistant_editor_page():
+    st.header("Assistant Editor")
+    
+    # --- Agent Selection ---
+    combined_agents = get_agent_list()
+    agent_names = list(combined_agents.keys())
+    
+    selected_agent_name = st.sidebar.selectbox("Select Agent to Edit", agent_names)
+    
+    if selected_agent_name:
+        assistant_id = combined_agents[selected_agent_name]['id']
+        is_live = combined_agents[selected_agent_name]['live']
         
-        page = st.radio(
-            "Select View",
-            ["📝 Edit Assistant", "➕ Create Assistant", "📊 Analytics", "📞 Phone Numbers", "⚙️ Settings"],
-            label_visibility="collapsed"
-        )
+        st.sidebar.info(f"**Assistant ID:** `{assistant_id}`")
+        st.sidebar.caption(f"Status: {'🟢 Live' if is_live else '🟡 Hardcoded (May be invalid)'}")
         
-        st.divider()
-        
-        # Agent Selection
-        if page in ["📝 Edit Assistant", "📊 Analytics"]:
-            assistants = list_assistants()
-            
-            if assistants:
-                assistant_map = {f"{a.get('name', 'Unnamed')} ({a['id'][:8]}...)": a['id'] for a in assistants}
-                agent_names = list(assistant_map.keys())
-                
-                selected_agent_name = st.selectbox("Select Agent", agent_names)
-                
-                if selected_agent_name:
-                    assistant_id = assistant_map[selected_agent_name]
-                    st.info(f"**ID:** `{assistant_id[:16]}...`")
-                    
-                    if 'selected_agent_id' not in st.session_state or st.session_state.selected_agent_id != assistant_id:
-                        st.session_state.selected_agent_id = assistant_id
-                        st.session_state.current_config = None
+        # Clear config if a new agent is selected
+        if 'selected_agent_id' not in st.session_state or st.session_state.selected_agent_id != assistant_id:
+            st.session_state.current_config = None
+            st.session_state.selected_agent_id = assistant_id
 
-                    if st.button("🔄 Load Configuration", use_container_width=True):
-                        with st.spinner("Loading..."):
-                            config = get_assistant_config(assistant_id)
-                            if config:
-                                st.session_state.current_config = config
-                                st.session_state.selected_agent_name = selected_agent_name
-                                st.rerun()
-                    
-                    if st.button("🗑️ Delete Assistant", use_container_width=True):
-                        if st.session_state.get('confirm_delete'):
-                            if delete_assistant(assistant_id):
-                                st.success("Deleted!")
-                                list_assistants.clear()
-                                st.session_state.current_config = None
-                                time.sleep(1)
-                                st.rerun()
-                            st.session_state.confirm_delete = False
-                        else:
-                            st.session_state.confirm_delete = True
-                            st.warning("Click again to confirm deletion")
+        if st.sidebar.button("Load Agent Configuration", use_container_width=True):
+            with st.spinner(f"Fetching configuration for {selected_agent_name}..."):
+                config = get_assistant_config(assistant_id)
+                if config:
+                    st.session_state.current_config = config
+                    st.session_state.selected_agent_name = selected_agent_name
+                    st.success("Configuration loaded successfully!")
+                else:
+                    st.session_state.current_config = None
         
-        st.divider()
-        st.caption("Vapi Agent Control Center v2.0")
-
-    # Main Content Area
-    if page == "📝 Edit Assistant":
+        st.sidebar.divider()
+        
+        # --- Configuration Editor Main Content ---
         if 'current_config' in st.session_state and st.session_state.current_config:
             config = st.session_state.current_config
             
-            # Header with metadata
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                st.header(f"Editing: {config.get('name', 'Unnamed Agent')}")
-            with col2:
-                st.metric("Created", format_timestamp(config.get('createdAt', 'N/A')))
-            with col3:
-                st.metric("Updated", format_timestamp(config.get('updatedAt', 'N/A')))
+            st.subheader(f"Editing: {st.session_state.selected_agent_name}")
             
-            st.divider()
+            # Extract fields for editing
+            current_name = config.get('name', st.session_state.selected_agent_name.split(' (')[0])
+            current_first_message = config.get('firstMessage', '')
+            current_background_sound = config.get('backgroundSound', 'office')
+            current_background_deniese = config.get('backgroundDenoisingEnabled', False)
+            current_end_call_phrases = config.get('endCallPhrases', [])
+            current_silence_timeout = config.get('silenceTimeoutSeconds', 10)
+            current_max_duration = config.get('maxDurationSeconds', 600)
+            current_record_enabled = config.get('recordingEnabled', False)
+            current_hipaa_enabled = config.get('hipaaEnabled', False)
+            current_server_url = config.get('serverUrl', '')
+            current_server_secret = config.get('serverSecret', '')
             
-            # Tabs for different sections
-            tab1, tab2, tab3 = st.tabs(["⚙️ Configuration", "📊 Analytics", "🔍 Raw JSON"])
+            model_config = config.get('model', {})
+            current_system_prompt = get_system_prompt(config)
+            current_model = model_config.get('model', 'gpt-4o')
+            current_temperature = model_config.get('temperature', 0.7)
+            current_max_tokens = model_config.get('maxTokens', 5030)
             
-            with tab1:
-                render_assistant_editor(config, st.session_state.selected_agent_id)
+            voice_config = config.get('voice', {})
+            current_voice_provider = voice_config.get('provider', 'playht')
+            current_voice_id = voice_config.get('voiceId', 'andrew')
             
-            with tab2:
-                render_call_analytics(st.session_state.selected_agent_id)
+            transcriber_config = config.get('transcriber', {})
+            current_transcriber_provider = transcriber_config.get('provider', 'deepgram')
+            current_transcriber_model = transcriber_config.get('model', 'base')
+            current_transcriber_language = transcriber_config.get('language', 'en')
             
-            with tab3:
-                st.subheader("Full Configuration (Read-Only)")
-                st.json(config)
+            with st.form("agent_editor_form"):
                 
-                if st.button("📋 Copy to Clipboard"):
-                    st.code(json.dumps(config, indent=2), language='json')
+                # --- General Settings ---
+                st.subheader("⚙️ General Settings")
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_name = st.text_input("Agent Name", value=current_name, max_chars=40)
+                with col2:
+                    new_server_url = st.text_input("Server URL", value=current_server_url, 
+                                                  help="Your backend server URL for webhooks")
+                
+                new_server_secret = st.text_input("Server Secret", value=current_server_secret, 
+                                                 type="password", help="Secret key for webhook authentication")
+                
+                # --- Call Experience ---
+                st.subheader("📞 Call Experience")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_background_sound = st.text_input(
+                        "Background Sound",
+                        value=current_background_sound,
+                        help="e.g., 'office', 'off', or a URL to an audio file."
+                    )
+                with col2:
+                    new_silence_timeout = st.number_input(
+                        "Silence Timeout (seconds)", 
+                        5, 300, current_silence_timeout, 5,
+                        help="How long to wait before ending call due to silence"
+                    )
+                with col3:
+                    new_background_denoise = st.checkbox("Background Denoising", value=current_background_deniese)
+                
+                st.divider()
+                
+                # --- Messages ---
+                st.subheader("💬 Conversation Settings")
+                new_first_message = st.text_area(
+                    "First Message (Initial Greeting)", 
+                    value=current_first_message, 
+                    height=100,
+                    help="The first message the agent speaks. Leave blank for user to speak first."
+                )
+                
+                new_system_prompt = st.text_area(
+                    "System Prompt (Agent Personality & Instructions)", 
+                    value=current_system_prompt, 
+                    height=300,
+                    help="Main instruction set for your AI agent."
+                )
+                
+                # End call phrases
+                end_phrases_text = st.text_area(
+                    "End Call Phrases (one per line)",
+                    value="\n".join(current_end_call_phrases),
+                    height=80,
+                    help="Phrases that will trigger the call to end"
+                )
+                new_end_call_phrases = [p.strip() for p in end_phrases_text.split('\n') if p.strip()]
+                
+                st.divider()
+                
+                # --- Model Configuration ---
+                st.subheader("🤖 AI Model Settings")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    model_options = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo', 
+                                   'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 
+                                   'claude-3-haiku-20240307']
+                    try:
+                        model_index = model_options.index(current_model)
+                    except ValueError:
+                        model_index = 0
+                    new_model = st.selectbox("LLM Model", options=model_options, index=model_index)
+                with col2:
+                    new_temperature = st.slider("Temperature", 0.0, 2.0, current_temperature, 0.1)
+                with col3:
+                    new_max_tokens = st.number_input("Max Tokens", 50, 4000, current_max_tokens, 50)
+                
+                # Knowledge Base (if available)
+                current_knowledge_base = model_config.get('knowledgeBase', {})
+                if current_knowledge_base:
+                    st.caption("📚 Knowledge Base: Enabled")
+                
+                st.divider()
+                
+                # --- Transcriber Configuration ---
+                st.subheader("🎤 Transcriber Settings")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_transcriber_provider = st.selectbox(
+                        "Provider",
+                        options=['deepgram', 'talkscriber'],
+                        index=['deepgram', 'talkscriber'].index(current_transcriber_provider) if current_transcriber_provider in ['deepgram', 'talkscriber'] else 0
+                    )
+                with col2:
+                    new_transcriber_model = st.text_input("Model", value=current_transcriber_model)
+                with col3:
+                    new_transcriber_language = st.text_input("Language", value=current_transcriber_language)
+                
+                st.divider()
+                
+                # --- Voice Configuration ---
+                st.subheader("🎙️ Voice Settings")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_voice_provider = st.selectbox(
+                        "Voice Provider",
+                        options=['playht', 'elevenlabs', 'azure', 'rime-ai', 'deepgram'],
+                        index=['playht', 'elevenlabs', 'azure', 'rime-ai', 'deepgram'].index(current_voice_provider) if current_voice_provider in ['playht', 'elevenlabs', 'azure', 'rime-ai', 'deepgram'] else 0
+                    )
+                with col2:
+                    new_voice_id = st.text_input("Voice ID", value=current_voice_id, help="e.g., andrew, jennifer")
+                with col3:
+                    voice_speed = voice_config.get('speed', 1.0)
+                    new_voice_speed = st.slider("Voice Speed", 0.5, 2.0, voice_speed, 0.1)
+                
+                st.divider()
+                
+                # --- Recording & Compliance ---
+                st.subheader("📹 Recording & Compliance")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_record_enabled = st.checkbox("Enable Call Recording", value=current_record_enabled)
+                with col2:
+                    new_hipaa_enabled = st.checkbox("HIPAA Compliance Mode", value=current_hipaa_enabled)
+                with col3:
+                    st.caption("⚠️ HIPAA mode affects data handling")
+                
+                # --- Timing Settings ---
+                st.subheader("⏱️ Timing & Duration")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    new_silence_timeout = st.number_input(
+                        "Silence Timeout (seconds)", 
+                        5, 300, current_silence_timeout, 5,
+                        help="How long to wait before ending call due to silence"
+                    )
+                with col2:
+                    new_max_duration = st.number_input(
+                        "Max Call Duration (seconds)", 
+                        60, 3600, current_max_duration, 60,
+                        help="Maximum duration for a call"
+                    )
+                with col3:
+                    response_delay = model_config.get('emotionRecognitionEnabled', False)
+                    new_emotion_recognition = st.checkbox("Emotion Recognition", value=response_delay)
+                
+                # Submit buttons
+                st.divider()
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                with col1:
+                    submitted = st.form_submit_button("💾 Save All Changes", use_container_width=True, type="primary")
+                with col2:
+                    preview = st.form_submit_button("👁️ Preview", use_container_width=True)
+                with col3:
+                    export = st.form_submit_button("📥 Export", use_container_width=True)
+                with col4:
+                    reset = st.form_submit_button("🔄 Reset", use_container_width=True)
+                
+                if submitted:
+                    # 1. Build the payload
+                    payload = {}
+                    
+                    # General
+                    if new_name != current_name:
+                        payload['name'] = new_name
+                    if new_server_url != current_server_url:
+                        payload['serverUrl'] = new_server_url
+                    if new_server_secret != current_server_secret:
+                        payload['serverSecret'] = new_server_secret
+                    
+                    # Call Experience
+                    if new_background_sound != current_background_sound:
+                        payload['backgroundSound'] = new_background_sound
+                    if new_background_denoise != current_background_deniese:
+                        payload['backgroundDenoisingEnabled'] = new_background_denoise
+                    
+                    # Messages
+                    if new_first_message != current_first_message:
+                        payload['firstMessage'] = new_first_message
+                    if new_end_call_phrases != current_end_call_phrases:
+                        payload['endCallPhrases'] = new_end_call_phrases
+                    
+                    # Model
+                    model_payload = {}
+                    if new_model != current_model:
+                        model_payload['model'] = new_model
+                    if new_temperature != current_temperature:
+                        model_payload['temperature'] = new_temperature
+                    if new_max_tokens != current_max_tokens:
+                        model_payload['maxTokens'] = new_max_tokens
+                    if new_emotion_recognition != model_config.get('emotionRecognitionEnabled', False):
+                        model_payload['emotionRecognitionEnabled'] = new_emotion_recognition
+                    
+                    # System Prompt Update
+                    temp_config = json.loads(json.dumps(config))
+                    set_system_prompt(temp_config, new_system_prompt)
+                    if temp_config.get('model', {}).get('messages') != config.get('model', {}).get('messages'):
+                        model_payload['messages'] = temp_config['model']['messages']
+                    
+                    if model_payload:
+                        payload['model'] = model_payload
+                    
+                    # Transcriber
+                    transcriber_payload = {}
+                    if new_transcriber_provider != current_transcriber_provider:
+                        transcriber_payload['provider'] = new_transcriber_provider
+                    if new_transcriber_model != current_transcriber_model:
+                        transcriber_payload['model'] = new_transcriber_model
+                    if new_transcriber_language != current_transcriber_language:
+                        transcriber_payload['language'] = new_transcriber_language
+                    
+                    if transcriber_payload:
+                        payload['transcriber'] = transcriber_payload
+                    
+                    # Voice
+                    voice_payload = {}
+                    if new_voice_provider != current_voice_provider:
+                        voice_payload['provider'] = new_voice_provider
+                    if new_voice_id != current_voice_id:
+                        voice_payload['voiceId'] = new_voice_id
+                    if new_voice_speed != voice_config.get('speed', 1.0):
+                        voice_payload['speed'] = new_voice_speed
+                    
+                    if voice_payload:
+                        payload['voice'] = voice_payload
+                    
+                    # Recording & Compliance
+                    if new_record_enabled != current_record_enabled:
+                        payload['recordingEnabled'] = new_record_enabled
+                    if new_hipaa_enabled != current_hipaa_enabled:
+                        payload['hipaaEnabled'] = new_hipaa_enabled
+                    
+                    # Timing
+                    if new_silence_timeout != current_silence_timeout:
+                        payload['silenceTimeoutSeconds'] = new_silence_timeout
+                    if new_max_duration != current_max_duration:
+                        payload['maxDurationSeconds'] = new_max_duration
+                    
+                    
+                    if payload:
+                        st.subheader("Payload to be sent:")
+                        st.json(payload)
+                        
+                        # 2. Send the update
+                        if update_assistant_config(st.session_state.selected_agent_id, payload):
+                            # 3. Reload config to show latest changes
+                            with st.spinner("Reloading configuration..."):
+                                get_assistant_config.clear()
+                                reloaded_config = get_assistant_config(st.session_state.selected_agent_id)
+                                if reloaded_config:
+                                    st.session_state.current_config = reloaded_config
+                                    st.rerun()
+                    else:
+                        st.info("No changes detected. Nothing to save.")
+                
+                if preview:
+                    st.subheader("Current Configuration Preview")
+                    st.json(config)
+                
+                if export:
+                    st.download_button(
+                        label="Download Config JSON",
+                        data=json.dumps(config, indent=2),
+                        file_name=f"{assistant_id}_config.json",
+                        mime="application/json"
+                    )
+                
+                if reset:
+                    st.session_state.current_config = None
+                    st.rerun()
+        
         else:
-            st.info("👈 Select an agent from the sidebar and click 'Load Configuration'")
+            st.info("Please select an agent and click 'Load Agent Configuration' to begin editing.")
+
+def phone_number_manager_page():
+    st.header("Phone Number Manager")
     
-    elif page == "➕ Create Assistant":
-        render_create_assistant()
+    phone_numbers = list_phone_numbers()
+    if not phone_numbers:
+        st.warning("No phone numbers found or API key is invalid.")
+        return
     
-    elif page == "📊 Analytics":
-        st.header("📊 Analytics Dashboard")
-        
-        if 'selected_agent_id' in st.session_state:
-            render_call_analytics(st.session_state.selected_agent_id)
-        else:
-            st.info("Select an agent from the sidebar to view analytics")
+    # Prepare data for display
+    data = []
+    for num in phone_numbers:
+        data.append({
+            "Number": num.get('number', 'N/A'),
+            "ID": num.get('id', 'N/A'),
+            "Assistant ID": num.get('assistantId', 'N/A'),
+            "Provider": num.get('provider', 'N/A'),
+            "Status": num.get('status', 'N/A')
+        })
     
-    elif page == "📞 Phone Numbers":
-        st.header("📞 Phone Number Management")
-        
-        phone_numbers = list_phone_numbers()
-        
-        if phone_numbers:
-            for phone in phone_numbers:
-                with st.expander(f"{phone.get('number', 'Unknown')} - {phone.get('provider', 'N/A')}"):
-                    st.json(phone)
-        else:
-            st.info("No phone numbers configured")
+    st.dataframe(pd.DataFrame(data), use_container_width=True)
     
-    elif page == "⚙️ Settings":
-        st.header("⚙️ Settings")
+    st.subheader("Update Phone Number Assistant")
+    
+    phone_options = {f"{d['Number']} ({d['ID'][:8]}...)": d['ID'] for d in data}
+    selected_phone_display = st.selectbox("Select Phone Number to Update", list(phone_options.keys()))
+    
+    if selected_phone_display:
+        selected_phone_id = phone_options[selected_phone_display]
         
-        st.subheader("API Configuration")
-        st.info("API key is configured in Streamlit secrets")
+        combined_agents = get_agent_list()
+        agent_options = {f"{name} ({details['id'][:8]}...)": details['id'] for name, details in combined_agents.items()}
         
-        st.subheader("Cache Management")
-        if st.button("Clear Assistant Cache"):
-            list_assistants.clear()
-            st.success("Cache cleared!")
+        new_assistant_display = st.selectbox("Assign New Assistant", list(agent_options.keys()))
         
-        st.subheader("About")
-        st.markdown("""
-        **Vapi Agent Control Center** provides advanced management capabilities for your Vapi assistants:
+        if st.button("Assign Assistant to Phone Number", type="primary"):
+            new_assistant_id = agent_options[new_assistant_display]
+            payload = {"assistantId": new_assistant_id}
+            
+            if update_phone_number(selected_phone_id, payload):
+                st.success(f"Successfully assigned {new_assistant_display} to {selected_phone_display}!")
+                list_phone_numbers.clear()
+                st.rerun()
+
+def call_logs_page():
+    st.header("Call Logs")
+    
+    combined_agents = get_agent_list()
+    agent_options = {f"{name} ({details['id'][:8]}...)": details['id'] for name, details in combined_agents.items()}
+    
+    filter_agent_display = st.selectbox("Filter by Assistant", ["All Assistants"] + list(agent_options.keys()))
+    
+    filter_assistant_id = agent_options[filter_agent_display] if filter_agent_display != "All Assistants" else None
+    
+    if st.button("Fetch Call Logs", type="primary"):
+        with st.spinner("Fetching call logs..."):
+            calls = list_calls(assistant_id=filter_assistant_id, limit=100)
+            
+            if not calls:
+                st.info("No calls found for the selected filter.")
+                return
+            
+            # Prepare data for display
+            data = []
+            for call in calls:
+                duration = call.get('duration', 0)
+                duration_str = f"{duration // 60}m {duration % 60}s"
+                
+                data.append({
+                    "ID": call.get('id', 'N/A'),
+                    "Assistant": call.get('assistantId', 'N/A')[:8] + '...',
+                    "From": call.get('customerNumber', 'N/A'),
+                    "To": call.get('phoneNumber', 'N/A'),
+                    "Duration": duration_str,
+                    "Status": call.get('status', 'N/A'),
+                    "Started At": datetime.fromisoformat(call['createdAt'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S') if 'createdAt' in call else 'N/A'
+                })
+            
+            st.dataframe(pd.DataFrame(data), use_container_width=True)
+            
+            # Option to view full details of a call
+            st.subheader("View Full Call Details")
+            call_ids = [d['ID'] for d in data]
+            selected_call_id = st.selectbox("Select Call ID", call_ids)
+            
+            if st.button("Get Full Details"):
+                details = get_call_details(selected_call_id)
+                if details:
+                    st.json(details)
+
+def squads_tools_page():
+    st.header("Squads & Tools Manager")
+    
+    st.subheader("Squads (Assistant Groups)")
+    squads = list_squads()
+    if squads:
+        squad_data = []
+        for squad in squads:
+            squad_data.append({
+                "Name": squad.get('name', 'N/A'),
+                "ID": squad.get('id', 'N/A'),
+                "Assistant Count": len(squad.get('assistantIds', [])),
+                "Routing Strategy": squad.get('routingStrategy', 'N/A')
+            })
+        st.dataframe(pd.DataFrame(squad_data), use_container_width=True)
+    else:
+        st.info("No squads found.")
         
-        - ✏️ Full assistant configuration editing
-        - 📊 Real-time call analytics
-        - ➕ Create new assistants
-        - 🗑️ Delete assistants
-        - 📞 Phone number management
-        - 🔍 Raw JSON inspection
-        
-        Version: 2.0.0
-        """)
+    st.subheader("Custom Tools/Functions")
+    tools = list_tools()
+    if tools:
+        tool_data = []
+        for tool in tools:
+            tool_data.append({
+                "Name": tool.get('name', 'N/A'),
+                "ID": tool.get('id', 'N/A'),
+                "Type": tool.get('type', 'N/A'),
+                "URL": tool.get('url', 'N/A')
+            })
+        st.dataframe(pd.DataFrame(tool_data), use_container_width=True)
+    else:
+        st.info("No custom tools found.")
 
 if __name__ == "__main__":
     main()
-
